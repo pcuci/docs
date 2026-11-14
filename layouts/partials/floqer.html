@@ -1,0 +1,19 @@
+{{- /*
+  Floqer (RB2B) visitor identification — https://floqer.com
+  Targeting (C0004) consent-gated: loads only after the visitor allows C0004, via
+  runWithPulumiConsent. Fail-closed: if consent is never satisfied, Floqer never loads.
+  Scoped per page via the `include_floqer: true` front-matter flag (wired in head.html).
+*/ -}}
+<script>
+    (function () {
+        function loadFloqer() {
+            var s = document.createElement("script");
+            s.type = "text/javascript";
+            s.async = true;
+            s.src = "https://workers.floqer.com/signals/contact-tracker?sid=2fcba3d4-92cc-4be2-b102-6e0cbce15b38&ref=" + encodeURIComponent(window.location.href);
+            var f = document.getElementsByTagName("script")[0];
+            f.parentNode.insertBefore(s, f);
+        }
+        window.runWithPulumiConsent("C0004", loadFloqer);
+    })();
+</script>

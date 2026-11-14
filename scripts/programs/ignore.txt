@@ -1,0 +1,37 @@
+# This file contains programs that should be ignored by the example code test script.
+
+# This also supports grep compatible regex patterns so we can ignore all programs that match
+# a given pattern. You can also include comments in the file to explain why the program is being ignored.
+
+# No need to include a leading anchor (^) or trailing EOL ($) as these are handled by the script to support
+# matching directories listed specifically.
+
+# Example:
+# aws-.* will ignore all programs that start with "aws-"
+#
+
+# Component implementation snippets for the experimental state migration API;
+# not a standalone Pulumi program.
+aws-s3-state-migration-.*
+component-state-migrations-option-.*
+awsx-vpc-state-migration-blog-typescript
+
+# CSI driver examples require a `github-pat` config value to pull a private
+# image/repo; CI does not provide one. The Go variant does not need it and
+# is tested. https://github.com/pulumi/docs/issues/14505
+kubernetes-csi-driver-csharp
+kubernetes-csi-driver-python
+kubernetes-csi-driver-typescript
+
+# All JS examples were removed from static programs.
+# TODO: See if this line can be removed once the code has been merged to master
+and the tests have been run.
+*-javascript
+
+# Static website programs require Hugo at runtime (subprocess.run), which
+# intermittently crashes (SIGABRT) in CI due to resource contention.
+aws-static-website-with-runtime-logic-.*
+
+# Terraform reference project: intentionally not a Pulumi program (used as
+# an external tfstate source by other examples).
+tf-state-ref-terraform

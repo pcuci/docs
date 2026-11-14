@@ -1,0 +1,113 @@
+---
+# This file is auto-generated from github.com/pulumi/pulumi/v3/pkg/cmd/pulumi/markdown
+title: "pulumi policy group edit | CLI commands"
+aliases:
+  - /docs/reference/cli/pulumi_policy_group_edit/
+  - /docs/iac/cli/commands/pulumi_policy_group_update/
+  - /docs/reference/cli/pulumi_policy_group_update/
+  - /docs/iac/cli/commands/pulumi_policy_group_modify/
+  - /docs/reference/cli/pulumi_policy_group_modify/
+meta_desc: "Reference for the pulumi policy group edit command: update a Policy Group's configuration. Usage, flags, and examples for the Pulumi CLI."
+---
+
+
+
+[EXPERIMENTAL] Update a Policy Group's configuration
+
+## Synopsis
+
+[EXPERIMENTAL] Update a Policy Group's configuration.
+
+Renames a Policy Group, adds or removes stacks, applies or detaches
+Policy Packs, adds or removes Insights accounts, and sets or removes
+match rules. At least one mutation flag must be provided.
+
+Default output is a human-readable summary; pass --output=json for the
+full response as JSON.
+
+Match rules (preview; requires the tag-based policy groups feature):
+
+--stack-rule and --account-rule set a rule over stack tags or Insights
+account tags. Stacks or accounts whose tags satisfy the rule are members
+of the group alongside those added individually. --account-rule is only
+allowed on audit groups. Setting a rule replaces the group's current rule,
+and setting it to '' removes it.
+
+A non-empty value is one of:
+  - Tag conditions separated by commas, all of which must hold:
+      key=value    the tag is set to value
+      key!=value   the tag is not set to value (also true when the tag is absent)
+      key          the tag exists
+      !key         the tag does not exist
+    Separate alternatives with " OR " to match entities that satisfy any
+    of them, as in 'env=prod,region=us-west-2 OR team'. This is the syntax
+    `pulumi policy group get` prints.
+  - A JSON PermissionBooleanExpression, as returned in the stackMatchRule
+    and accountMatchRule fields of `pulumi policy group get --output json`.
+
+Use JSON when a tag key or value contains ',', '=' or the word "or", or a
+key starts or ends with '!' or starts with '{'.
+
+```
+pulumi policy group edit <name> [flags]
+```
+
+## Examples
+
+```
+  # Rename a Policy Group
+  pulumi policy group edit prod-policies --name production
+
+  # Add a stack and a Policy Pack to a group
+  pulumi policy group edit prod-policies --add-stack web/prod --add-policy-pack aws-guardrails@3
+
+  # Replace the stack rule: stacks tagged env=prod, or any stack with a team tag
+  pulumi policy group edit prod-policies --stack-rule 'env=prod OR team'
+
+  # Set an account rule from a JSON file on an audit group
+  pulumi policy group edit compliance --account-rule "$(cat account-rule.json)"
+
+  # Remove the stack rule
+  pulumi policy group edit prod-policies --stack-rule ''
+```
+
+## Options
+
+```
+      --account-rule string                   Replace the Insights account match rule, in the same syntax as --stack-rule. Audit groups only. '' removes the rule
+      --add-insights-account stringArray      Add an Insights account to the Policy Group (repeatable)
+      --add-policy-pack stringArray           Add a Policy Pack to the Policy Group (repeatable). Format: 'name@version' or 'name'
+      --add-stack stringArray                 Add a stack to the Policy Group (repeatable). Format: 'project/stack' or 'stack'
+  -h, --help                                  help for edit
+      --name string                           Rename the Policy Group
+      --org string                            The organization that owns the Policy Group
+      --output string                         Output format. Supported values are: default and json (default "default")
+      --remove-insights-account stringArray   Remove an Insights account from the Policy Group (repeatable)
+      --remove-policy-pack stringArray        Remove a Policy Pack from the Policy Group (repeatable). Format: 'name@version' or 'name'
+      --remove-stack stringArray              Remove a stack from the Policy Group (repeatable). Format: 'project/stack' or 'stack'
+      --stack-rule string                     Replace the stack match rule: tag conditions such as 'env=prod,team!=web OR owner', or a JSON expression. '' removes the rule
+```
+
+## Options inherited from parent commands
+
+```
+      --color string                 Colorize output. Choices are: always, never, raw, auto (default "auto")
+  -C, --cwd string                   Run pulumi as if it had been started in another directory
+      --disable-integrity-checking   Disable integrity checking of checkpoint files
+  -e, --emoji                        Enable emojis in the output
+  -Q, --fully-qualify-stack-names    Show fully-qualified stack names
+      --logflow                      Flow log settings to child processes (like plugins)
+      --logtostderr                  Log to stderr instead of to files
+      --memprofilerate int           Enable more precise (and expensive) memory allocation profiles by setting runtime.MemProfileRate
+      --non-interactive              Disable interactive mode for all commands
+      --otel-traces string           Export OpenTelemetry traces to the specified endpoint. Use file:// for local JSON files, grpc:// or https:// for remote collectors
+      --profiling string             Emit CPU and memory profiles and an execution trace to '[filename].[pid].{cpu,mem,trace}', respectively
+      --tracing file:                Emit tracing to the specified endpoint. Use the file: scheme to write tracing data to a local file
+  -v, --verbose int                  Enable verbose logging (e.g., v=3); anything >3 is very verbose
+```
+
+## SEE ALSO
+
+* [pulumi policy group](/docs/iac/cli/commands/pulumi_policy_group/)	 - Manage policy groups
+
+###### Auto generated by spf13/cobra on 12-Nov-2026

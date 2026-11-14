@@ -1,9 +1,9 @@
 {
     "compilerOptions": {
         "outDir": "bin",
-        "target": "es6",
+        "target": "es2020",
         "lib": [
-            "es6"
+            "es2020"
         ],
         "module": "commonjs",
         "moduleResolution": "node",
@@ -14,9 +14,26 @@
         "noImplicitAny": true,
         "noImplicitReturns": true,
         "forceConsistentCasingInFileNames": true,
-        "strictNullChecks": true
+        "strictNullChecks": true,
+        "skipLibCheck": true
     },
     "files": [
-        "index.ts"
+        "index.ts",
+        "supportForm.ts",
+        "supportRedirect.ts",
+        "support-form/validation.ts",
+        "support-form/handler.ts",
+        "support-form/intercom.ts",
+        "pricingApi.ts",
+        "pricing-api/pricing.ts",
+        "pricing-api/livePricing.ts",
+        "pricing-api/liveRates.ts",
+        "pricing-api/handler.ts",
+        "support-form/validation.test.ts",
+        "support-form/intercom.test.ts",
+        "pricing-api/pricing.test.ts",
+        "pricing-api/livePricing.test.ts",
+        "pricing-api/liveRates.test.ts",
+        "pricing-api/handler.test.ts"
     ]
 }

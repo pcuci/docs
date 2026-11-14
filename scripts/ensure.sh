@@ -1,15 +1,56 @@
 #!/bin/bash
 
-# Make sure the Node version matches what's in .nvmrc (and in our GitHub Actions workflows).
-current_version="$(node -v)"
-required_version="$(cat .nvmrc)"
+set -o errexit -o pipefail
 
-if [ ! $(echo ${current_version} | grep ${required_version}) ]; then
-    printf "\nIt looks like you're running Node %s, but this project uses Node %s.\n" ${current_version} ${required_version}
-    printf "If you're using nvm, try running nvm use.\n\n"
-    exit 1
+color_red=$(echo -e "\033[0;31m")
+color_yellow=$(echo -e "\033[0;33m")
+color_blue=$(echo -e "\033[0;34m")
+color_end=$(echo -e "\033[0m")
+
+# If mise is installed locally, install the tool versions pinned in
+# mise.toml and put them on PATH for the remainder of this script. This
+# block is a no-op in CI, which installs tools via its own actions
+# (setup-node, peaceiris/actions-hugo, etc.).
+if command -v mise &> /dev/null; then
+    echo "${color_blue}Installing pinned tool versions via mise...${color_end}"
+    mise install
+    export PATH="$(mise bin-paths 2>/dev/null | tr '\n' ':')${PATH}"
 fi
 
+check_version() {
+    tool_name="$1"
+    executable="$2"
+    version_string="$(eval $3)"
+    required_version="$4"
+
+    details="See the README at https://github.com/pulumi/docs for installation instructions."
+
+    if ! command -v "$executable" &> /dev/null; then
+        echo "${color_red}error${color_end} This project requires $1, but the '$2' executable is either not installed or not on your PATH."
+        echo "$details"
+        exit 1
+    fi
+
+    if [ ! $(echo ${version_string} | grep ${required_version}) ]; then
+        printf "${color_yellow}warning${color_end} It looks like you're running %s %s, but this project uses version %s.\n" ${tool_name} ${version_string} ${required_version}
+        echo "$details"
+    fi
+}
+# The Hugo pin lives in mise.toml. A standalone assignment, so errexit stops the
+# script if scripts/hugo-version.sh can't read it (a failing substitution inside
+# a function argument would not, and an empty pin would match any version).
+hugo_version="$(./scripts/hugo-version.sh)"
+check_version "Node.js"  "node"  "node -v | sed 's/v\([0-9\.]*\).*$/\1/'"            "24"
+check_version "Hugo"     "hugo"  "hugo version | sed 's/hugo v\([0-9\.]*\).*$/\1/'"  "${hugo_version}"
+check_version "Yarn"     "yarn"  "yarn -v | sed 's/v\([0-9\.]*\).*$/\1/'"            "1.22"
+
 # Install the Node dependencies for the website and the infrastructure.
-yarn install
+yarn install --ignore-engines
 yarn --cwd infrastructure install
+yarn --cwd theme install
+yarn --cwd theme/stencil install
+
+# Warm up prettier cache for faster linting
+echo ""
+echo "${color_blue}Note:${color_end} Warming prettier cache (this will make 'make lint' faster)..."
+./scripts/prettier.sh --check . --cache --loglevel warn

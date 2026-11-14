@@ -1,0 +1,9 @@
+id = "miki-manor"
+name = "Miki Manor"
+title = "Director of Infrastructure Engineering"
+company = "Skai"
+status = "guest"
+role = "alumni-puluminary"
+[social]
+github = "MikiManor"
+linkedin = "mikimanor"

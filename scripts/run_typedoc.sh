@@ -13,18 +13,18 @@ set -o errexit -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TOOL_TYPEDOC="$SCRIPT_DIR/../node_modules/.bin/typedoc"
+TOOL_TYPEDOC_CONFIG="$SCRIPT_DIR/../typedoc.json"
 
-PULUMI_DOC_TMP=`mktemp -d`
-PULUMI_DOC_BASE="$SCRIPT_DIR/../content/docs/reference/pkg/nodejs/pulumi"
-PULUMI_DOC_DATA_BASE="$SCRIPT_DIR/../data/pkg/nodejs/pulumi"
+OUTDIR="${SCRIPT_DIR}/../static-prebuilt/docs/reference/pkg/nodejs/pulumi"
 
 # Set this to 1 to run all generation in parallel.
 PARALLEL=0
 
 # Generates API documentation for a given package. The arguments are:
 #     * $1 - the simple name of the package (e.g., "azure" for the pulumi-azure package)
-#     * $2 - the package root directory (to run `make ensure` for dependency updates)
-#     * $3 - the package source directory, relative to the root, optionally empty if the same
+#     * $2 - the typescript entry point file for the package, relative to the source directory, usually index.ts.
+#     * $3 - the package root directory (to run `make ensure` for dependency updates)
+#     * $4 - the package source directory, relative to the root, optionally empty if the same
 # If the PKGS envvar is set, only packages in that list (space delimited) are regenerated.
 generate_docs() {
     GENPKG=""
@@ -40,50 +40,42 @@ generate_docs() {
 
     if [[ ! -z "$GENPKG" ]]; then
         echo -e "\033[0;95m$1\033[0m"
-        echo -e "\033[0;93mGenerating typedocs\033[0m"
+        echo -e "\033[0;93mGenerating pulumi.com API docs\033[0m"
 
         # Change to the target directory and rebuild if necessary.
-        PKGPATH=../$2
+        PKGPATH=../$3
         pushd $PKGPATH
         if [[ -z "$NOBUILD" ]]; then
             git clean -xdf
             make ensure && make build && make install
         fi
-        if [[ ! -z "$3" ]]; then
-            PKGPATH=$PKGPATH/$3
-            cd $3
+        if [[ ! -z "$4" ]]; then
+            PKGPATH=$PKGPATH/$4
+            cd $4
         fi
 
-        PKG_REPO_DIR=$2
-        if [[ ! -z "$3" ]]; then
-        PKG_REPO_DIR=$PKG_REPO_DIR/$3
+        PKG_REPO_DIR=$3
+        if [[ ! -z "$4" ]]; then
+        PKG_REPO_DIR=$PKG_REPO_DIR/$4
         fi
 
-        # Generate the docs, copy any READMEs, and remember the Git hash.
-        ${TOOL_TYPEDOC} --json "${PULUMI_DOC_TMP}/$1.docs.json" \
-            --mode modules --includeDeclarations --excludeExternals --excludePrivate
-        mkdir -p ${PULUMI_DOC_TMP}/readmes
-        find . -name 'README.md' -exec rsync -R {} ${PULUMI_DOC_TMP}/readmes \;
-        HEAD_COMMIT=$(git rev-parse HEAD)
+        ${TOOL_TYPEDOC} --out "${OUTDIR}/$1" \
+            --excludeInternal --excludeExternals --excludePrivate \
+            --cleanOutputDir \
+            --skipErrorChecking \
+            --includeVersion \
+            --options "$TOOL_TYPEDOC_CONFIG" \
+            "$2"
 
-        # Change back to the origin directory and create the API documents.
-        popd
-        echo -e "\033[0;93mGenerating pulumi.com API docs\033[0m"
-        pushd ./tools/tscdocgen
-        echo -e "go run *.go" "$SCRIPT_DIR/../${PKGPATH}" "$1" "${PULUMI_DOC_TMP}/$1.docs.json" "${PULUMI_DOC_BASE}/$1" "${PULUMI_DOC_DATA_BASE}" "$PKG_REPO_DIR" $HEAD_COMMIT
-        go run *.go "$SCRIPT_DIR/../${PKGPATH}" "$1" "${PULUMI_DOC_TMP}/$1.docs.json" "${PULUMI_DOC_BASE}/$1" "${PULUMI_DOC_DATA_BASE}" "$PKG_REPO_DIR" $HEAD_COMMIT
         popd
     fi
 }
 
 REPOS=(
-    "awsx,pulumi-awsx/sdk/nodejs"
-    "cloud,pulumi-cloud/api"
-    "eks,pulumi-eks/nodejs/eks"
-    "kubernetesx,pulumi-kubernetesx/nodejs/kubernetesx"
-    "policy,pulumi-policy,sdk/nodejs/policy"
-    "pulumi,pulumi/sdk/nodejs"
-    "terraform,pulumi-terraform,sdk/nodejs"
+    "policy,index.ts,pulumi-policy,sdk/nodejs/policy"
+    "pulumi,index.ts,pulumi/sdk/nodejs"
+    "esc-sdk,index.ts,esc-sdk/sdk/typescript/esc"
+    "cloud-sdk,src/index.ts,pulumi-cloud-sdk/nodejs"
 )
 
 PIDS=()
@@ -93,13 +85,14 @@ for repo in ${REPOS[*]}
 do
     IFS=',' read -r -a repo_parts <<< "$repo"
     SIMPLE_NAME=${repo_parts[0]}
-    PACKAGE_NAME=${repo_parts[1]}
-    ROOT_PATH=${repo_parts[2]}
+    ENTRY_POINT=${repo_parts[1]}
+    PACKAGE_NAME=${repo_parts[2]}
+    ROOT_PATH=${repo_parts[3]}
     if [ "$PARALLEL" -eq "1" ]; then
-        generate_docs $SIMPLE_NAME $PACKAGE_NAME $ROOT_PATH &
+        generate_docs $SIMPLE_NAME $ENTRY_POINT $PACKAGE_NAME $ROOT_PATH &
         PIDS+=($!)
     else
-        generate_docs $SIMPLE_NAME $PACKAGE_NAME $ROOT_PATH
+        generate_docs $SIMPLE_NAME $ENTRY_POINT $PACKAGE_NAME $ROOT_PATH
         PIDS+=($!)
     fi
     echo -e $!
@@ -111,5 +104,15 @@ do
     echo -e "Waiting on: $pid"
     wait $pid
 done
+
+# --- SEO/AEO head metadata post-pass --------------------------------------
+# TypeDoc's default theme is used as-is in this repo (no editable .hbs
+# templates to hook into), so the fix runs as a post-process over the
+# already-generated HTML instead of a template change.
+# Runs over the whole OUTDIR so it covers every package generated above.
+echo -e "\033[0;93mInjecting SEO head metadata (canonical, per-page description, JSON-LD)\033[0m"
+python3 "${SCRIPT_DIR}/typedoc_seo_postprocess.py" \
+    "${OUTDIR}" \
+    "https://www.pulumi.com/docs/reference/pkg/nodejs/pulumi"
 
 echo "Done"

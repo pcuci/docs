@@ -1,100 +1,47 @@
 // Copyright 2016-2021, Pulumi Corporation.  All rights reserved.
 
+import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 import {
     CloudFrontRequest,
     CloudFrontRequestEvent,
     CloudFrontResponse,
-    CloudFrontResponseEvent,
 } from "aws-lambda";
-import * as URLPattern from "url-pattern";
 import { LambdaEdge } from "./lambdaEdge";
+import { getResources } from "@pulumi/aws/resourcegroupstaggingapi/getResources";
 
-/**
- * Returns the Lambda function associations for the CloudFront distribution.
- * @param addSecurityHeaders If true, creates Lambda@Edge that sets security headers on
- * origin responses and adds the Lambda to the list of associated triggers.
- * @param doEdgeRedirects If true, creates a Lambda@Edge function that that conditionally
-*  redirects based on the URL of the request.
- */
-export function getLambdaFunctionAssociations(addSecurityHeaders: boolean, doEdgeRedirects: boolean):
-    aws.types.input.cloudfront.DistributionDefaultCacheBehaviorLambdaFunctionAssociation[] {
+// Edge functions must be defined in us-east-1.
+const usEast1Provider = new aws.Provider("usEast1", {
+    region: aws.Region.USEast1,
+});
 
-    const associations = [];
+export function getEdgeRedirectAssociation(): aws.types.input.cloudfront.DistributionDefaultCacheBehaviorLambdaFunctionAssociation {
+    const edgeRedirectsLambda = new LambdaEdge("redirects", {
+        func: getEdgeRedirectsLambdaCallback(),
+        funcDescription: "Lambda function that conditionally redirects based on a path-matching expression.",
+    }, { provider: usEast1Provider });
 
-    // Edge functions must be defined in us-east-1.
-    const provider = new aws.Provider("usEast1", {
-        region: aws.Region.USEast1,
-    });
-
-    if (addSecurityHeaders) {
-        const securityHeadersLambda = new LambdaEdge(
-            "security",
-            {
-                disableResourceNamePrefix: true,
-                func: getSecurityHeadersLambdaCallback(),
-                funcDescription: "Lambda function that sets security headers on a Cloudfront origin response.",
-            },
-            {
-                provider,
-            },
-        );
-        associations.push({
-            includeBody: false,
-            lambdaArn: securityHeadersLambda.getLambdaEdgeArn(),
-            // Origin response is a type of trigger that runs the function only when CF
-            // contacts the origin for a file. Thus reducing the number of times the func
-            // is actually invoked.
-            //
-            // See the following link for all trigger events supported by CF:
-            // https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html
-            eventType: "origin-response",
-        });
-    }
-
-    if (doEdgeRedirects) {
-        const edgeRedirectsLambda = new LambdaEdge(
-            "redirects",
-            {
-                func: getEdgeRedirectsLambdaCallback(),
-                funcDescription: "Lambda function that conditionally redirects based on a path-matching expression.",
-            },
-            {
-                provider,
-            },
-        );
-        associations.push({
-            includeBody: false,
-            lambdaArn: edgeRedirectsLambda.getLambdaEdgeArn(),
-            eventType: "origin-request",
-        });
-    }
-
-    return associations;
-}
-
-function getSecurityHeadersLambdaCallback(): aws.lambda.Callback<CloudFrontResponseEvent, CloudFrontResponse> {
-    // See the following link for an example:
-    // https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-edge-how-it-works-tutorial.html
-    return (event, context, callback) => {
-
-        // Get contents of response.
-        const response = event.Records[0].cf.response;
-        const headers = response.headers;
-
-        // Set new headers.
-        headers["x-frame-options"] = [{
-            key: "X-Frame-Options",
-            value: "DENY",
-        }];
-
-        // Return modified response.
-        callback(null, response);
+    return {
+        includeBody: false,
+        lambdaArn: edgeRedirectsLambda.getLambdaEdgeArn(),
+        eventType: "origin-request",
     };
 }
 
-function getEdgeRedirectsLambdaCallback():
-    aws.lambda.Callback<CloudFrontRequestEvent, CloudFrontRequest | CloudFrontResponse> {
+const aiRedirectAndGoneLambda = new LambdaEdge("ai-redirect-gone", {
+    func: getAIRedirectAndGoneLambdaCallback(),
+    funcDescription: "Lambda function that redirects /ai to /product/neo/ and returns 410 Gone for /ai/* subpaths.",
+}, { provider: usEast1Provider });
+
+export function getAIRedirectAndGoneAssociation(): aws.types.input.cloudfront.DistributionDefaultCacheBehaviorLambdaFunctionAssociation {
+    return {
+        includeBody: false,
+        lambdaArn: aiRedirectAndGoneLambda.getLambdaEdgeArn(),
+        eventType: "origin-request",
+    };
+}
+
+function getEdgeRedirectsLambdaCallback(): aws.lambda.Callback<CloudFrontRequestEvent, CloudFrontRequest | CloudFrontResponse> {
     // https://aws.amazon.com/blogs/networking-and-content-delivery/handling-redirectsedge-part1/
     return (event: CloudFrontRequestEvent, context, callback) => {
         const request = event.Records[0].cf.request;
@@ -131,8 +78,38 @@ function getEdgeRedirectsLambdaCallback():
     };
 }
 
+function getAIRedirectAndGoneLambdaCallback(): aws.lambda.Callback<CloudFrontRequestEvent, CloudFrontRequest | CloudFrontResponse> {
+    return (event: CloudFrontRequestEvent, context, callback) => {
+        const request = event.Records[0].cf.request;
+        const uri = request.uri;
+
+        // Redirect /ai or /ai/ to /product/neo/.
+        if (uri === "/ai" || uri === "/ai/") {
+            callback(null, {
+                status: "301",
+                statusDescription: "Moved Permanently",
+                headers: {
+                    "location": [{ key: "Location", value: "/product/neo/" }],
+                    "cache-control": [{ key: "Cache-Control", value: "max-age=604800" }],
+                },
+            });
+            return;
+        }
+
+        // All other /ai/* subpaths return 410 Gone.
+        callback(null, {
+            status: "410",
+            statusDescription: "Gone",
+            headers: {
+                "cache-control": [{ key: "Cache-Control", value: "max-age=604800" }],
+                "content-type": [{ key: "Content-Type", value: "text/plain" }],
+            },
+        });
+    };
+}
+
 function getRedirect(uri: string): string | undefined {
-    return getRegistryRedirect(uri) || getSDKRedirect(uri);
+    return getRegistryRedirect(uri) || getSDKRedirect(uri) || getResourcesRedirect(uri);
 }
 
 function getRegistryRedirect(uri: string): string | undefined {
@@ -163,10 +140,6 @@ function getCloudProvidersRedirect(uri: string): string | undefined {
             .replace("setup", "installation-configuration");
     }
 
-    if (uri.includes("/registry/packages/azure-native-v2")) {
-        return uri.replace("azure-native-v2", "azure-native")
-    }
-
     return undefined;
 }
 
@@ -195,11 +168,6 @@ function getTutorialsRedirect(uri: string): string | undefined {
 
     if (tutorialsPage) {
         const packageName = tutorialsPage[1];
-
-        // Don't redirect cloudfx, as we don't have a new home for its tutorial content yet.
-        if (packageName === "cloudfx") {
-            return undefined;
-        }
 
         const isAWSNativeGuide = AWS_NATIVE_TUTORIALS.some((awsNativeGuide) => uri.includes(awsNativeGuide))
         if (isAWSNativeGuide) {
@@ -241,9 +209,18 @@ function getSDKRedirect(uri: string): string | undefined {
     return nodeSDKRedirect(uri) || pythonSDKRedirect(uri) || dotnetSDKRedirect(uri) || undefined;
 }
 
+// redirect /resources/* to /events/* following workshop+event URL rename to capture orphaned links
+function getResourcesRedirect(uri: string): string | undefined {
+    if (uri.startsWith("/resources/")) {
+        return uri.replace("/resources/", "/events/");
+    }
+
+    return undefined;
+}
+
 function nodeSDKRedirect(uri: string): string | undefined {
-    const pattern = new URLPattern("/docs/reference/pkg/nodejs/pulumi/:provider(/:service)(*)");
-    const match = pattern.match(uri);
+    const regex = /^\/docs\/reference\/pkg\/nodejs\/pulumi\/([^\/]+)(?:\/([^\/]+))?/;
+    const match = uri.match(regex);
     const exceptions = [
         "pulumi",
         "cloud",
@@ -251,54 +228,55 @@ function nodeSDKRedirect(uri: string): string | undefined {
         "awsx",
         "kubernetesx",
         "terraform",
+        "esc-sdk",
+        "cloud-sdk",
     ];
 
-    if (match && match.provider && !exceptions.includes(match.provider)) {
-        if (match.service && !match.service.match(/types|config/)) {
-            return `/docs/reference/pkg/${match.provider}/${match.service}/?language=nodejs`;
+    if (match && match[1] && !exceptions.includes(match[1])) {
+        if (match[2] && !match[2].match(/types|config/)) {
+            return `/docs/reference/pkg/${match[1]}/${match[2]}/?language=nodejs`;
         }
-        return `/docs/reference/pkg/${match.provider}/?language=nodejs`;
+        return `/docs/reference/pkg/${match[1]}/?language=nodejs`;
     }
 
     return undefined;
 }
 
 function pythonSDKRedirect(uri: string): string | undefined {
-    const pattern = new URLPattern("/docs/reference/pkg/python/pulumi_(:provider)(/:service)(*)");
-    const match = pattern.match(uri);
+    const regex = /^\/docs\/reference\/pkg\/python\/pulumi_([^\/]+)(?:\/([^\/]+))?/;
+    const match = uri.match(regex);
     const exceptions = [
         "pulumi",
         "policy",
         "terraform",
+        "esc_sdk",
+        "cloud_sdk",
     ];
 
-    if (match && match.provider && !exceptions.includes(match.provider)) {
-        if (match.service) {
-            return `/docs/reference/pkg/${match.provider}/${match.service}/?language=python`;
+    if (match && match[1] && !exceptions.includes(match[1])) {
+        if (match[2]) {
+            return `/docs/reference/pkg/${match[1]}/${match[2]}/?language=python`;
         }
-        return `/docs/reference/pkg/${match.provider}/?language=python`;
+        return `/docs/reference/pkg/${match[1]}/?language=python`;
     }
 
     return undefined;
 }
 
 function dotnetSDKRedirect(uri: string): string | undefined {
-    const pattern = new URLPattern(
-        "/docs/reference/pkg/dotnet/Pulumi.:provider/Pulumi.:providerRepeated(.:service)(.*).html"
-    );
-    const match = pattern.match(uri);
+    // URI is pre-lowercased by the CloudFront Function on the dotnet/* path.
+    const regex = /^\/docs\/reference\/pkg\/dotnet\/pulumi\.([^\/]+)\/pulumi\.\1(?:\.([^\/\.]+))?.*\.html/;
+    const match = uri.match(regex);
     const exceptions = [
-        "Automation",
-        "FSharp",
+        "automation",
+        "fsharp",
     ];
 
-    if (match && match.provider && !exceptions.includes(match.provider)) {
-        if (match.service && !match.service.match(/Types|Config/)) {
-            // tslint:disable-next-line:max-line-length
-            return `/docs/reference/pkg/${match.provider.toLowerCase()}/${match.service.toLowerCase()}/?language=csharp`;
+    if (match && match[1] && !exceptions.includes(match[1])) {
+        if (match[2] && !match[2].match(/types|config/)) {
+            return `/docs/reference/pkg/${match[1]}/${match[2]}/?language=csharp`;
         }
-        return `/docs/reference/pkg/${match.provider.toLowerCase()}/?language=csharp`;
-
+        return `/docs/reference/pkg/${match[1]}/?language=csharp`;
     }
 
     return undefined;

@@ -1,43 +1,15 @@
 languageCode: en-us
-title: Pulumi - Universal Infrastructure as Code
+title: Pulumi - Infrastructure as Code in Any Programming Language
 
-module:
-  imports:
-    - path: github.com/pulumi/registry/themes/default
-      mounts:
-        - source: content
-          target: content
-        - source: layouts
-          target: layouts
-        - source: data
-          target: data
-    - path: github.com/pulumi/pulumi-hugo/themes/default
-      mounts:
-        - source: content
-          target: content
-        - source: assets
-          target: assets
-        - source: static
-          target: static
-        - source: layouts
-          target: layouts
-        - source: data
-          target: data
-
+refLinksErrorLevel: ERROR
 security:
   funcs:
     getenv:
       - ASSET_BUNDLE_ID
-      - REPO_THEME_PATH
-      - PULUMI_CONVERT_URL
-      - PULUMI_AI_WS_URL
+      - CSS_BUNDLE_ID
       - GITHUB_TOKEN
       - ALGOLIA_APP_ID
       - ALGOLIA_APP_SEARCH_KEY
-
-disableKinds:
-  - category
-  - taxonomyTerm
 
 sectionPagesMenu: main
 pygmentsCodeFences: true
@@ -56,9 +28,57 @@ enableGitInfo: true
 # 10 seconds to avoid timeouts when generating the site.
 timeout: 300000
 
+# Exclude static/programs from Hugo's file watcher. It's ~15 MiB / 2000+ files
+# of code samples maintained by codegen, not during normal authoring — watching
+# them just slows `hugo server` down. The files are still served; only the
+# watch is disabled.
+#
+# Declaring a mount that overlaps `static` disables Hugo's default
+# `static → static` mount, so we re-declare it. Other defaults (archetypes,
+# assets, content, data, i18n, layouts, etc.) are still auto-added.
+module:
+  mounts:
+    - source: static
+      target: static
+    - source: static/programs
+      target: static/programs
+      disableWatch: true
+
 outputFormats:
   rss:
     baseName: rss
+  llms:
+    mediaType: "text/plain"
+    baseName: "llms"
+    isPlainText: true
+    permalinkable: false
+  markdown:
+    mediaType: "text/markdown"
+    baseName: "index"
+    isPlainText: true
+    notAlternative: true
+  llmsitemap:
+    mediaType: "application/json"
+    baseName: "llm-sitemap"
+    isPlainText: true
+    notAlternative: true
+  # Bare list-rows HTML fragment for a taxonomy term, fetched by the homepage
+  # category filter (theme/src/ts/blog-list.ts). Rendered by
+  # layouts/_default/term.rows.html at /blog/categories/<id>/rows.html. Not an
+  # alternate representation, so it stays out of <head> alternates and sitemap.
+  rows:
+    mediaType: "text/html"
+    baseName: "rows"
+    isHTML: true
+    notAlternative: true
+  # Generated replacement for the formerly hand-maintained static/sitemap-index.xml.
+  # Rendered once, on the home page, by layouts/index.sitemapindex.xml.
+  sitemapindex:
+    mediaType: "application/xml"
+    baseName: "sitemap-index"
+    isPlainText: true
+    notAlternative: true
+    noUgly: true
 
 # We set the outputs explicitly to just "HTML" as otherwise they default to both
 # "HTML" and "RSS", and we only want to generate RSS for the blog section -- not
@@ -69,16 +89,67 @@ outputs:
   home:
     - HTML
     - JSON
+    - llms
+    - markdown
+    - sitemapindex
   section:
     - HTML
+  page:
+    - HTML
+  # Taxonomy term pages also emit a "rows" fragment (layouts/_default/term.rows.html).
+  # Only the blog category filter consumes it; for non-blog terms the fragment is
+  # empty (the template filters to the blog section).
+  # RSS gives every blog term page (category / tag / author / series) its own feed
+  # at <term-url>rss.xml, rendered by layouts/_default/term.rss.xml.
+  term:
+    - HTML
+    - rows
+    - RSS
 
 taxonomies:
-  author: authors
   tag: tags
+  author: authors
+  # Plural is intentionally "category" (not "categories") so Hugo reads the
+  # existing scalar `category:` front matter on blog posts. Hugo casts the
+  # scalar value to a one-term list. See layouts/taxonomy/category.html and
+  # data/blog_categories.yaml (single source of truth for term titles/desc).
+  category: category
+  # Like category above, plural is "series" (not "serieses") so Hugo reads the
+  # existing scalar `series:` front matter and casts it to a one-term list. Term
+  # pages land at /blog/series/:slug/. See layouts/taxonomy/series.html and
+  # data/blog_series.yml (single source of truth for series titles/desc).
+  series: series
 
 permalinks:
-  authors: /blog/author/:slug/
-  tags: /blog/tag/:slug/
+  term:
+    authors: /blog/authors/:slug/
+    tags: /blog/tags/:slug/
+    category: /blog/categories/:slug/
+    series: /blog/series/:slug/
+  # The taxonomy LIST pages (the directories rendered by
+  # layouts/taxonomy/<singular>.terms.html). Without these they would sit at
+  # Hugo's default /authors/, /tags/, /category/, and /series/,
+  # leaving the parent of every term URL (/blog/authors/, /blog/tags/, ...) a 404.
+  # content/{authors,tags}/_index.md alias the old /authors/ and /tags/ URLs.
+  taxonomy:
+    authors: /blog/authors/
+    tags: /blog/tags/
+    category: /blog/categories/
+    series: /blog/series/
+
+# Built-in Related Content, used by layouts/partials/blog/related-posts.html to
+# top up a post's related list. Tags dominate; category and recency break ties.
+related:
+  threshold: 80
+  includeNewer: true
+  toLower: true
+  indices:
+    - name: tags
+      weight: 100
+    - name: category
+      weight: 40
+    - name: date
+      weight: 10
 
 markup:
   goldmark:
@@ -94,7 +165,7 @@ markup:
       autoHeadingID: true
       autoHeadingIDType: "github"
       attribute:
-        block: false
+        block: true
         title: true
     renderer:
       hardWraps: false
@@ -102,11 +173,38 @@ markup:
       xhtml: false
 
 params:
+    # OneTrust domain script. The test id here covers local dev, PR previews and
+    # www.pulumi-test.io; config/production overrides it with the live id.
+    oneTrustDomainScript: 01a090cf-8fe9-7448-94a1-4b90a7c501d4-test
+
+    # CTA configuration
+    cta:
+        primary:
+            label: "Get started"
+            label_short: "Sign up"
+            href: "/up/"
+        secondary:
+            label: "Contact us"
+            href: "/contact/?form=sales"
+
     canonicalURL: https://www.pulumi.com
-    contentRepositoryURL: https://github.com/pulumi/pulumi-hugo
+    contentRepositoryURL: https://github.com/pulumi/docs
     contentRepositoryBaseBranch: master
     registryRepositoryURL: https://github.com/pulumi/registry
     registryRepositoryBaseBranch: master
     meta_desc: |
         Pulumi's open source infrastructure as code SDK enables you to create, deploy,
         and manage infrastructure on any cloud, using your favorite languages.
+
+    # Schema.org configuration
+    schema:
+        # Pulumi CLI version - dynamically updated by CI/CD
+        pulumi_version: "3.198.0"
+
+        # Performance optimization
+        max_content_scan_length: 5000
+
+minify:
+  tdewolff:
+    html:
+      keepQuotes: true

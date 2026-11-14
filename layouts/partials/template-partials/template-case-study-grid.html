@@ -1,0 +1,99 @@
+{{/*
+    Template Case Study Grid Partial
+
+    Static 3-up grid of customer cards (no carousel). Each card pulls the logo
+    and the `case_study:` block (link, stat, quote) from the customer's entry in
+    data/customers.yaml, with optional per-card overrides for the title,
+    description, and CTA text.
+
+    Parameters:
+    - title: Optional section title rendered above the grid.
+    - description: Optional section description (markdown supported).
+    - align: Optional "left" (default) or "center" for the title block.
+    - cards: Array of card objects, each with:
+        - customer: Customer id in data/customers.yaml (required). A customer
+                    with no `case_study` is a hard build failure — fix the id
+                    rather than let a card silently disappear.
+        - title: Optional custom card heading. Overrides the default (which
+                 is the case study's stat + stat_label).
+        - description: Optional custom card body. Overrides the default
+                       (which is the case study's quote).
+        - use_quote: Optional bool. When true and no custom title/description
+                     is given, render the full quote block (quote + attrib).
+                     Default: false — uses headline_stat/headline summary.
+        - cta_text: Optional CTA text (default: "Read case study").
+        - cta_link: Optional CTA link (default: the case study page).
+    - anchor: Optional anchor for section id.
+*/}}
+
+{{ $title := .title }}
+{{ $description := .description }}
+{{ $align := .align | default "left" }}
+{{ $cards := .cards }}
+{{ $anchor := .anchor }}
+
+<section class="template-case-study-grid flex flex-col gap-8"{{ if $anchor }} id="{{ $anchor }}"{{ end }}>
+    {{ if or $title $description }}
+    <div class="{{ if eq $align "center" }}sm:text-center max-w-4xl mx-auto{{ else }}text-left{{ end }}">
+        {{ if $title }}
+        <h2 class="section-header-title m-0 mb-4">{{ $title }}</h2>
+        {{ end }}
+        {{ if $description }}
+        <p class="section-header-description {{ if eq $align "left" }}!ml-0 !mr-auto{{ end }}">{{ $description | markdownify }}</p>
+        {{ end }}
+    </div>
+    {{ end }}
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {{ range $cards }}
+            {{ $customer := partial "customers/get.html" (dict "id" .customer "where" "template-case-study-grid.html") }}
+            {{ $study := $customer.case_study }}
+            {{ if not $study }}
+                {{ errorf "template-case-study-grid.html: customer %q has no case_study in data/customers.yaml (card %q)." .customer (.title | default .customer) }}
+            {{ end }}
+            {{ $link := default $study.href .cta_link }}
+            {{ $ctaText := .cta_text | default "Read case study" }}
+            {{ $cardTitle := .title }}
+            {{ $cardDescription := .description }}
+            {{ $useQuote := .use_quote | default false }}
+            {{ $quote := $study.quote }}
+            {{ $quoteAttrib := $study.attribution }}
+            {{ $headlineStat := $study.stat }}
+            {{ $headline := $study.stat_label }}
+
+            <div class="card flex flex-col p-8 gap-6 h-full">
+                <div class="case-study-card-logo flex items-start">
+                    {{ partial "customer-logo.html" (dict "customer" .customer) }}
+                </div>
+
+                <div class="flex flex-col gap-3 grow">
+                    {{ if $cardTitle }}
+                        <h3 class="template-feature-card-title m-0">{{ $cardTitle }}</h3>
+                    {{ else if and $useQuote $quote }}
+                        <blockquote class="font-semibold text-black border-0 m-0 p-0 text-lg">{{ $quote | markdownify }}</blockquote>
+                        {{ if $quoteAttrib }}
+                        <p class="text-sm font-semibold text-gray-700 m-0">{{ $quoteAttrib }}</p>
+                        {{ end }}
+                    {{ else if $headlineStat }}
+                        <h3 class="template-feature-card-title m-0">{{ $headlineStat }}{{ with $headline }} {{ . }}{{ end }}</h3>
+                    {{ end }}
+
+                    {{ if $cardDescription }}
+                    <div class="template-feature-card-description">{{ $cardDescription | markdownify }}</div>
+                    {{ else if and (not $useQuote) (not $cardTitle) $quote }}
+                    <div class="template-feature-card-description">{{ $quote | markdownify }}</div>
+                    {{ end }}
+                </div>
+
+                {{ if $ctaText }}
+                <div class="mt-auto">
+                    <a href="{{ $link }}" class="btn btn-link btn-xl">
+                        {{ $ctaText }}
+                        {{ partial "icon.html" (dict "name" "arrow-right" "weight" "bold" "class" "size-4") }}
+                    </a>
+                </div>
+                {{ end }}
+            </div>
+        {{ end }}
+    </div>
+</section>

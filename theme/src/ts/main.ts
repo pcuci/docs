@@ -1,0 +1,40 @@
+import { defineCustomElements } from "../../stencil/dist/loader";
+
+import "../scss/main.scss";
+
+import "./misc";
+import "./nav";
+import "./carousel";
+import "./chooser";
+import "./noselect";
+import "./tracking";
+import "./analytics-event-links";
+import "./docs-feedback";
+import "./blog-list";
+import "./blog-post";
+import "./blog-lightbox";
+import "./details-dropdown";
+import "./copybutton";
+import "./code-tabbed";
+import "./code-snippets-dropdown";
+import "./resources";
+import "./event-sessions";
+import "./releases";
+import "./packages";
+import "./support-form";
+import "./developer-advocates";
+import "./docs-main";
+import "./docs-theme";
+import "./redirects";
+// Algolia is built as a separate entry point (algolia-entry.ts) and loaded
+// only on pages with a #search element. See assets.html.
+import "./external-links";
+import "./neo-mode";
+import "./console-banner";
+import "./announcement-banner";
+import "./statuspage";
+import "./intercom-identity";
+import "./consent-media";
+
+// Register all Stencil components.
+defineCustomElements();

@@ -1,62 +1,38 @@
 const fs = require("fs");
 const glob = require("glob");
 const postcss = require("postcss");
-const purgecss = require("@fullhuman/postcss-purgecss");
 const cssnano = require("cssnano");
 
-function minifyCSS(filePath) {
-    const bundlePath = glob.sync(filePath)[0];
+// Per-bundle minification configuration.
+//
+// Tailwind v4 emits its variants using native CSS nesting (e.g. `.hover\:bg-gray-100
+// { &:hover { ... } }`), which PurgeCSS's selector matcher does not understand —
+// running PurgeCSS over Tailwind v4 output silently drops every hover, focus,
+// focus-visible, group-hover, space-y/x, and many responsive utility rules. Tailwind
+// v4 already content-scans @source paths and only emits classes it finds, so PurgeCSS
+// is both redundant and destructive here. We keep cssnano for minification only.
+const bundles = [
+    {
+        name: "bundle",
+        input: "public/css/bundle.*.css",
+    },
+    {
+        name: "marketing",
+        input: "public/css/marketing.*.css",
+    },
+];
 
-    // If there is no matching bundle then we will skip minifying things.
+function minifyCSS(config) {
+    const bundlePath = glob.sync(config.input)[0];
+
     if (bundlePath === undefined) {
         return Promise.resolve();
     }
 
     const css = fs.readFileSync(bundlePath);
+    const outputPath = `public/css/${config.name}.${cssBundleId}.css`;
 
     return postcss([
-
-        // PurgeCSS removes unused CSS by analyzing the files of the built website.
-        // https://purgecss.com/
-        purgecss({
-            content: [ "public/**/*.html", "public/js/bundle.*.js" ],
-            // PurgeCSS looks through all the built files but, making an exception here
-            // to skip the files in the azure-native-v2 package because it is causing
-            // out of memory errors with all the new files added from the package. This
-            // should not affect the minified bundle, since there isn't any new css being
-            // used for this package that wouldn't already be in the bundle.
-            skippedContentGlobs: [
-                "public/registry/packages/azure-native-v1/**/*",
-            ],
-            css: [
-                bundlePath,
-            ],
-            safelist: {
-                deep: [
-                    /^hs-/,
-                    /^highlight$/,
-                    /^pagination$/,
-                    /^code-/,
-                    /^copy-/,
-                    /^carousel/,
-                    /^st-/,
-                    /^icon-/,
-                    /^package-details/,
-                    /^resources-properties/,
-                    /^tabular/,
-                    /^pulumi-/,
-                ],
-            },
-
-            // We need to extract the Tailwind screen size selectors (e.g. sm, md, lg)
-            // so that we do not strip them out. As long as a class name appears in the HTML
-            // in its entirety, PurgeCSS will not remove it.
-            // Ex. https://tailwindcss.com/docs/optimizing-for-production#writing-purgeable-html
-            defaultExtractor: content => content.match(/[\w-/.:]+(?<!:)/g) || [],
-        }),
-
-        // CSSNano minifies our rendered CSS by removing whitespace, comments, etc.
-        // https://cssnano.co/
         cssnano({
             preset: [
                 "default",
@@ -68,7 +44,7 @@ function minifyCSS(filePath) {
             ],
         }),
     ])
-    .process(css, { from: bundlePath, to: bundlePath })
+    .process(css, { from: bundlePath, to: outputPath })
     .then(result => {
         const css = result.css;
 
@@ -77,15 +53,25 @@ function minifyCSS(filePath) {
             throw new Error(`Unexpected PostCSS result: ${css}`);
         }
 
-        // Write the result back to the file.
-        fs.writeFileSync(bundlePath, css);
+        fs.writeFileSync(outputPath, css);
+        console.log(`Minified: ${outputPath}`);
     });
 }
 
-minifyCSS("public/css/bundle.*.css").then(() => {
-    minifyCSS("public/css/marketing.*.css").then(() => {
-        console.log("CSS bundles minified successfully!");
-    });
+const cssBundleId = process.env.CSS_BUNDLE_ID;
+
+if (!cssBundleId) {
+    console.error("ERROR: CSS_BUNDLE_ID environment variable not set");
+    process.exit(1);
+}
+
+if (!fs.existsSync("public/css")) {
+    fs.mkdirSync("public/css", { recursive: true });
+}
+
+Promise.all(bundles.map(b => minifyCSS(b))).then(() => {
+    console.log("CSS bundles minified successfully!");
+    bundles.forEach(b => console.log(`  - ${b.name}.${cssBundleId}.css`));
 });
 
 // Exit non-zero when something goes wrong in the promise chain.

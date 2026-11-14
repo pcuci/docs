@@ -1,86 +1,186 @@
 # Contributing Pulumi Documentation
 
-## Pulumi terminology
+## Draft-first pull requests
 
-- Use `pulumi` or "the Pulumi CLI" to refer to the CLI.
-- Use `pulumi.com` to refer to the service.
+Open new PRs as **drafts** while you iterate. Automated review (style, accuracy, fact-check) fires only when you mark a PR **ready for review**, so a draft-first flow:
+
+- Keeps your branch out of the noisy "every push triggers a review" loop.
+- Lets you push iteratively without spamming the PR with new comments each time.
+- Means the eventual review reflects your finished thinking, not a half-finished commit.
+
+While you're iterating, consider running `/docs-review` locally — it runs the same style/accuracy pipeline as the automated bot, but stays in your conversation and never posts to GitHub. Catching findings here is cheaper than catching them after the pinned review fires.
+
+When you're ready, use the **Ready for review** button on the PR page. Triage runs again to refresh labels, then the full review fires once and pins its findings to a single comment at the top of the PR. New commits afterward mark the review **stale**. A small push that only touches the lines the review flagged refreshes the review automatically; anything larger won't auto-rerun — comment `/update-review` to refresh, or transition through draft and back to ready.
+
+If your change is genuinely trivial (a typo, a one-line fix), opening directly as ready is fine — the pipeline will short-circuit on the `review:trivial` label.
+
+## Inactive pull requests close after 30 days
+
+Any open PR, drafts included, closes automatically after 30 days without activity. Activity means a commit, or a comment, review, or reopen from a person; labels and bot comments don't count. A heads-up comment lands a week before the close, and nothing is lost when it happens: the branch stays put and reopening is one click.
+
+If a PR is meant to sit for a while (it's waiting on a release, say), add the `review:long-running` label. That stretches the window to 90 days without activity. It's a longer grace period, not an exemption, so a labeled PR still closes if nobody touches it for three months. If yours was closed and you meant to keep it, reopen it and add the label.
+
+The policy lives in the `stale_prs:` block of `.github/review-routing.yml`, and `.github/workflows/stale-pr-sweep.yml` enforces it.
+
+## AI-assisted contributions
+
+The repository runs a tiered review pipeline on every PR. AI-assisted contributors should know how it works so they can collaborate with it instead of fighting it.
+
+### Review commands
+
+You drive the review with slash commands. Put the command at the start of a line in a PR comment, an inline review comment, or a review's comment box; the rest of the comment is your request, and the review reads it as written. A command inside a code span, a code block, or a quote doesn't run, so you can talk about one without firing it.
+
+| Command | Where | What it does |
+|---|---|---|
+| `/update-review [request]` | Any PR comment or review | Refreshes the review against the current head. The rest of the comment is the request: a fix you pushed, a dispute, an acceptance, or something to change first. See [After review](#after-review--three-paths-to-refresh). |
+| `/update-review accept F<n> [F<n>…] [reason]`, `/update-review accept all [reason]` | A PR comment, by the PR's author | Records the named open findings (or every open one) as accepted, with no model run. The reason is optional and can follow on the lines below. Only this exact shape runs this way: a reason that names another finding ID, someone other than the author, or any other wording goes to the model as an ordinary `/update-review`. IDs that don't apply get a reply saying so. |
+| `/new-review [note]` | Any PR comment or review | Throws the review away and runs a fresh one from scratch. Wins over `/update-review` when a comment has both. See [the escape hatch](#power-user-escape-hatch-new-review). |
+| `/social-review` | A PR comment | Re-runs the social copy review of a blog post's `social:` front matter. |
+| `/deploy-staging` | A PR comment | Starts a pulumi-test.io staging deploy of the PR's current head, the evidence the Sentinel's `staging` gate needs when a PR changes the deploy itself. It reacts 👀 within seconds, then 🚀 when the deploy starts (the `Sentinel / staging` status links the run), or 😕 with a one-line reply saying why nothing ran: already deployed or running at this head, a fork PR, no write access, a closed PR, or staging deploys turned off. It only ever deploys staging. |
+| `/oversized-ack` | Your **Approve** review's comment, on a `review:oversized` PR | Records that you reviewed the PR by hand (the Sentinel's `oversized` gate). |
+
+The commands need write access to the repository (`/social-review`: an org member or collaborator). A command runs when its comment is posted, so editing an old comment into one does nothing; post a new one. `/oversized-ack` is the exception: the Sentinel rereads your approval, so editing it in works.
+
+`/update-review approve` doesn't approve the PR: approval is a GitHub review from someone other than the author, and the bot replies saying so with the `accept` form for any open findings.
+
+`@claude` isn't a command. On its own it asks Claude for ad-hoc help, and it never touches the review. The old `@claude … #update-review` and `@claude … #new-review` shapes are retired, and a command typed after the mention (`@claude /update-review …`) isn't a command either: they run nothing, and a bot reply shows the same request rewritten as a slash command.
+
+### The v3 review surface (staged rollout)
+
+The review has moved from one monolithic pinned comment to the **v3 surface**, enabled by the `REVIEW_V3_COMMENTS` repo variable (on for pulumi/docs). Every fresh review now renders the v3 cards; a PR reviewed before the flip keeps its legacy monolith until someone comments `/new-review`, which regenerates it as cards. Where the sections below say "the pinned comment", read "the author card" on a v3 PR. What v3 changed:
+
+- **Two comments instead of one.** An **author card** ("Author action guide") lists only what you must act on — one-line `🚨 Fix or disagree` and `❓ Questions for you` rows (both block merge), each with a `#### F<n> · Do this` block underneath (the flagged line verbatim, why, and exactly one required fix — replacement text in a copyable fenced block), plus inline ✏️ style suggestions. A separate **reviewer's guide** tells your reviewer what the PR contains, what's still waiting on you, what to check, and what's machine-verified. The bulk — the verification trail, investigation log, review history — lives on a linked **evidence page**, not in the comments.
+- **Every finding has a stable ID** (`F1`, `F2`, …) and every blocking finding needs an answer before merge — fix, disagree, or accept. Fix it and push (the card shows a 🔄 banner within a minute when your push triggers the automatic re-review), or reply naming the ID:
+
+  ```
+  /update-review F2: the 40% figure comes from the Q3 interview series
+  /update-review F2: accepting as-is — shipping for the launch, follow-up filed
+  /update-review accepting all open items — <reason>
+  ```
+
+  Either way your answer counts: the review marks the item resolved, or holds it with a 🛡️ note for your reviewer — it stops blocking merge in both cases. The `/update-review` command is what routes the reply; a bare `@claude` is ad-hoc help and unblocks nothing.
+- **The Sentinel check** is the review gate: review ran at your head SHA (a rebase or base merge that leaves your diff unchanged keeps it), every blocking finding answered, and a change that could break `pulumi up` (the Pulumi program, `run-pulumi.sh`, the `make ci_push` chain into it, the deploy workflows — `staging_evidence.paths` in that same file) carries a green staging deploy. Build scripts are *not* on that list: your PR already runs the same pipeline in preview mode, so it has proved them; what a preview can't do is apply. Who can approve and merge is branch protection's call, not the Sentinel's: every PR gets a team requested as its reviewer (per `.github/review-routing.yml`), and an approval from anyone with write access counts. [`REVIEW.md`](REVIEW.md) is what an agent reviewer such as Eon checks before it approves. Each gate posts its own status in the merge box (`Sentinel / review`, `findings`, `staging`, `oversized`): a line saying what it wants, and a **Details** link to where you act (the author card, a failed or running staging deploy, or the Files tab to approve). There's no gate-status comment on the PR. A staging gate never asks you to run a workflow by hand: if no deploy ran, comment `/deploy-staging`; if one failed, open it and click **Re-run failed jobs**. A member of any team listed in that file's `teams:` can apply `review:waived` as the logged break-glass; it clears every gate. With `REVIEW_V3_SENTINEL` set to `1` the check enforces, so every gate has to be green before the PR can merge. Set to `report`, it runs in **preview mode**: every status passes and its description starts "Preview". Unset, the check does not run at all, and because `master` requires the Sentinel status, that holds every PR for anyone but a repo admin: to stand the gate down, set it to `report`, never unset it or disable the workflow. If a PR's Sentinel never reports, re-run it from **Actions › Sentinel › Run workflow** with the PR number; if it still can't report (an outage of the org-scoped token refuses `review:waived` too), a repo admin can merge past it.
+- **Truly mechanical changes skip the model review, not the approver** — they still route to the lane team and still need its approval. The tightened bar in `classify_mechanical` (`triage-classify.py`) is what earns the skip: ≤10 added / ≤30 deleted lines, ≤2 docs/blog files, no structural or code changes, only resolving internal-link additions, frontmatter keys limited to `updated`/`tags`, and no prose-claim signal. Miss any of them and the PR gets the full review as well.
+
+The disposition vocabulary, the outcome table, and "work the review to zero" below all apply unchanged — v3 just gives each finding an ID and a one-line way to answer it.
+
+### What ready-for-review triggers
+
+Transitioning to **Ready for review** triggers:
+
+1. A re-triage to refresh labels (domain, trivial / frontmatter-only short-circuits, prose-flagged signal if applicable).
+1. The full Claude review (currently `claude-opus-5`), composed per touched domain. Findings post as the two v3 cards — the author card (`<!-- CLAUDE_REVIEW_AUTHOR -->`) and the reviewer's guide (`<!-- CLAUDE_REVIEW_BRIEF -->`) — with the verification trail on the linked evidence page. A PR reviewed before the v3 flip still carries the legacy single pinned comment (overflow tagged `<!-- CLAUDE_REVIEW N/M -->`).
+
+Mark the PR ready when you're done iterating, not when you start. Each ready-transition produces one full review run; thrashing through draft → ready → draft burns review budget and produces stale pinned comments.
+
+### Author a clean commit history
+
+If the PR was AI-drafted, leave the AI authoring trailers in commit messages (`Co-Authored-By: Claude ...`, `Generated with Claude Code`, etc.). Stripping them to disguise authorship is bad form and does not change which review runs.
+
+### After review — three paths to refresh
+
+A pinned review goes **stale** when you push new commits after it ran. One case refreshes itself: when the review had outstanding findings and your push is small (≤80 changed lines) and touches only the flagged lines — the "I fixed what you flagged" push — a deterministic gate auto-fires the scoped `/update-review` path with no comment needed. Merging the base branch into your PR doesn't count as a change: when the diff the review read is unchanged, the review is carried across to the new head. Everything else stays stale until you refresh explicitly. Three ways:
+
+1. **`/update-review`** — refresh the pinned review against the current PR head. Runs `claude-opus-5`. Three patterns the update path understands, all of which can appear in the same comment (the pipeline addresses any embedded asks inline before re-rendering the review):
+    - **Fix-response** ("I addressed your feedback"): re-verifies the previous outstanding findings against the new diff and moves the resolved ones into ✅ Resolved.
+    - **Dispute** ("I disagree with the X finding because Y"): re-examines the disputed finding with your evidence; either concedes cleanly or explains why it's keeping the finding.
+    - **Re-verify** (a bare `/update-review`): re-checks outstanding findings only.
+
+    While it works, your comment gets a 👀; when the card is updated, the 👀 becomes a 🚀. A failed refresh comments back to you with how to retry. `/new-review` signals the same way.
+
+    For anything that isn't a re-review (questions, code fixes, one-off requests), mention `@claude` instead. It runs in tag mode with its own animated tracking comment and doesn't touch the pinned review. A comment that mentions `@claude` *and* runs `/update-review` belongs to the update lane, which handles the ask itself.
+1. **Transition through draft and back to ready** — re-triggers the full initial review. Use this when the PR has changed substantially since the last review.
+1. **Wait for the human reviewer** — the reviewer's guide is their source of truth, and the Sentinel check tells them (and you) whether anything still blocks. A reviewer who wants a fresh look asks for one with `/update-review`, same as you.
+
+#### Power-user escape hatch: `/new-review`
+
+Rare. Use when the pinned-review state is corrupted (the 1/M comment was manually deleted, the comment sequence is malformed, the review is stuck in a wrong state that `/update-review` can't reconcile). Clears every existing review comment (the v3 cards, or a legacy `<!-- CLAUDE_REVIEW N/M -->` sequence) and dispatches a fresh initial review from scratch — same workflow that fires on ready-for-review, just bypassing the trivial / frontmatter-only / draft / bot-author skips. Don't use it for routine refreshes; `/update-review` is the right tool for those.
+
+### Working the review to zero
+
+A review is finished when every finding it raised has an outcome — not when the 🚨 count hits zero. On a v3 PR the author card carries **🚨 Fix or disagree** and **❓ Questions for you** (both block merge) plus the **✏️ style suggestions** posted inline on the Files-changed tab; the reviewer's guide carries **⚠️ Check these before approving** for your reviewer. On a legacy monolith the buckets are **🚨 Outstanding** (must be resolved or refuted before merge), **⚠️ Low-confidence** (doesn't block, still needs a decision), and the same ✏️ suggestions. 💡 Pre-existing is the one optional bucket — that's not debt this PR created.
+
+Five outcomes count as done, and no others:
+
+| Outcome | When | What it takes |
+|---|---|---|
+| **Fixed** | The finding is right | Push the change. A small push that lands only on flagged lines refreshes the review by itself |
+| **Refuted** | The finding is wrong | Dispute it in an `/update-review` comment, with evidence. The model concedes cleanly or explains why it's holding |
+| **Deferred** | Real, but out of scope here | File an issue and link it in the PR thread |
+| **Accepted** | Shipping as-is on purpose | Say why, in the PR. An accepted blocker that nobody explained reads as an oversight |
+| **Not applicable** | The finding mis-anchored | Say what it actually points at. Several of these in one review usually means the review went stale — refresh it |
+
+This matters past your own PR. After a PR closes, `scrape-review-outcomes.py` derives what happened to each finding and aggregates it into the Monday `#docs-ops` digest, which is how the review's severity rules get tuned. A finding you fixed but never refreshed scrapes as ignored; a finding you disagreed with but never disputed scrapes as ignored too. Both push the pipeline toward flagging *more*, not less.
+
+Working the list by hand is fine. If you'd rather not, **`/address-review`** does it with you: it watches for the review to land, enumerates every item — inline style suggestions included — into one checklist, walks them a finding at a time with a proposed fix for each, batches the fixes into a single push, and writes the `/update-review` comment. It won't call the PR done while anything is undecided. The same check standalone:
+
+```bash
+python3 .claude/commands/docs-review/scripts/review-worklist.py --pr <N> \
+  --state .review-worklist-<N>.json --require-clean
+```
+
+### Don't fight the review comments
+
+The review comments are managed by the pipeline: on a v3 PR the author card and the reviewer's guide (`<!-- CLAUDE_REVIEW_AUTHOR -->` / `<!-- CLAUDE_REVIEW_BRIEF -->`), on an older PR the `<!-- CLAUDE_REVIEW N/M -->` sequence. Don't delete them — the re-entrant lanes expect to find and edit them in place, and the author card's `REVIEW_STATE` block is where your answers are recorded. If one goes missing, `/new-review` regenerates from scratch; recoverable but ugly.
+
+**Don't hide them either.** Marking a card resolved (**Hide** → *Resolved*) collapses it but leaves it in place, so a later `/update-review` edits a comment nobody can see: the job runs green, posts its "🤖 Review updated" progress note, and the refreshed review never appears. The publish path now unhides the comment before patching, but the mutation can be refused by the token's scopes — if a refresh looks like a no-op, check whether the card is collapsed and unhide it. Use the ✅ Resolved section inside the card to track what you've addressed; that's what it's for.
+
+The author card is also the pipeline's outcome ledger (the S3 evidence record mirrors it): after a PR closes, a weekly scrape derives what happened to each finding (fixed, conceded, disputed, or merged over) and aggregates it into the Monday `#docs-ops` digest, which is how the review's severity rules get tuned over time.
+
+### Trivial, frontmatter-only, and oversized short-circuits
+
+Three label-driven short-circuits skip the full Claude review (linters still run):
+
+- **`review:trivial`** — ≤10 added lines, prose-only body changes, ≤2 docs/blog `.md` files, no frontmatter changes, no link changes, no code blocks. Typo fixes, wording polish, small same-claim sweeps across siblings, and removal-dominant cleanup (no upper bound on deletions). Marketing/website pages (`domain:website`) get full review regardless of size.
+- **`review:frontmatter-only`** — any number of docs/blog `.md` files where every change is inside the frontmatter block. Aliases sweeps, `draft: false` flips, `meta_desc` rewrites, social copy edits.
+- **`review:oversized`** — more than 15K changed lines, or more than 150 changed files. At that scale the bulk is invariably generated output: the review can't finish inside its job timeout and wouldn't add value to generated lines anyway. Triage posts a `<!-- TRIAGE_OVERSIZED -->` advisory comment suggesting the hand-written source be split into its own PR, or that a human review it by hand, assisted by their own AI subscription seat (for example, Claude Code running `/docs-review` locally). The reviewer who approves it records that hand review with the `/oversized-ack` [review command](#review-commands) at the start of a line in their **Approve** review's comment (or by running `gh pr review <number> --approve --body /oversized-ack`). The Sentinel's `oversized` gate reads it only there, and only from an approval of the latest commit.
+
+For both categories, triage runs a focused spelling/grammar pass on the relevant diff slice. If it finds anything, it posts a single advisory comment listing the concerns AND applies `review:prose-flagged` so reviewers don't miss it. The short-circuit label still applies and the full review still skips. This is a guard against rubber-stamping — a typo "fix" that introduces a typo, or a `meta_desc` rewrite with a wrong-word substitution, gets flagged before merge.
+
+With no review to wait for, the Sentinel's `review` gate passes a trivial or frontmatter-only PR on its own: it re-checks that the diff really has that shape, and the human approval branch protection asks for is the review. If the diff doesn't fit the label (someone applied it by hand, say), `review` stays red until you comment `/new-review`.
+
+Classification is deterministic and lives in `.claude/commands/docs-review/scripts/triage-classify.py` — domain (path-precedence), triviality, and frontmatter-only detection are all path/grep rules. The model is invoked only for the prose check, only when the shell pre-classifies as trivial or frontmatter-only.
 
 ## Documentation structure
 
-- There is a folder for each heading in the top navigation, such as `Install`, `getting-started`, etc.
+The mapping from documentation page to section and table-of-contents (TOC) is stored largely in each page's front matter, leveraging [Hugo Menus](https://gohugo.io/content-management/menus/). Menus for the CLI commands and API reference are specified in `./config.toml`.
 
-- The mapping from documentation page to section and table-of-contents (TOC) is stored largely in each page's front matter, leveraging [Hugo Menus](https://gohugo.io/content-management/menus/). Menus for the CLI commands and API reference are specified in `./config.toml`.
+## Hugo tips
 
-### Links to other files
+### Short codes
 
-We generally use Hugo's [`relref` shortcode](https://gohugo.io/content-management/shortcodes/#ref-and-relref) when linking to other pages. Examples:
+To share common content across articles, use [Hugo Shortcodes](https://gohugo.io/content-management/shortcodes/). Place a .html file in the [layouts/shortcodes] folder. To include it in a page, use syntax `{{< my-shortcode >}}`
 
-```markdown
-[Install]({{< relref "/docs/get-started/install" >}})
-[Outputs]({{< relref "/docs/intro/concepts/stack#outputs" >}})
+For example, our custom [`cleanup`](layouts/shortcodes/cleanup.html) shortcode can be included in .md files, to include common text about cleaning up stack resources:
+
+```plain
+{{< cleanup >}}
 ```
 
-Which, on a page inside the `./content/reference` directory, will generate:
+HTML layouts can include other layouts inside the [layouts/partials](layouts/partials) directory, e.g.:
 
-```html
-<a href="/docs/install/">Install</a>
-<a href="/docs/intro/concepts/stack/#stack-outputs">Outputs</a>
+```plain
+{{ partial "head.html" . }}
 ```
 
-### Hugo tips
+### Front matter
 
-- **Redirects.** If you rename a file or directory, add a 301 redirect in the front-matter via an [alias](https://gohugo.io/content-management/urls/#aliases) `aliases: [/previous-dir/previousfile.html]`.
+Front matter is defined as a YAML block at the top of a Markdown document that defines metadata about the page. Pulumi docs pages often include the following front matter variables:
 
-- **Includes.**
+- `aliases`: A list of relative URLs that should point to the content in this page. When moving or renaming a page, you must add an `alias` entry for the old path of the page relative to the `content/` folder.
+- `allow_long_title`: Set to `true` in order disable length validation on the `title` attribute.
+- `block_external_search_index`: Set to `true` to mark the page `noindex` for Google (crawlable and its links still followed, just excluded from search results) and to drop it from both `sitemap.xml` and the Algolia index (`scripts/search/page.js` excludes any page with this set). Use this for a page that should stay reachable and linkable but has no business appearing in Google or on-site search results — for example, a large set of uniformly auto-generated reference pages that would otherwise clutter search results with content nobody is searching for by name.
+- `h1`: If specified, the `<h1>` at the top of the page will use this value instead of the value in the `title` attribute.
+- `menu`: Specifies where a page appears in the document navigation tree.
+- `meta_desc`: Required (unless `redirect_to` is set), at least 50 characters, no longer than 160 characters. This displays as the description of the page in web search results.
+- `meta_image`: Blog posts only. Relative path to an OpenGraph image (1200×628) for social media previews and the blog home page. The image must be a PNG file for compatibility.
+- `feature_image`: Blog posts only. Relative path to a high-resolution hero image (1884×1256) displayed at the top of the blog post page.
+- `meta_title`: If specified, the meta title (for OpenGraph) will use this value instead of the value in the `title` attribute.
+- `redirect_to`: The relative or absolute URL of a permanent redirect.
+- `sitemap_exclude`: Set to `true` to omit the page from the generated `sitemap.xml` without affecting crawling or indexing (unlike `block_external_search_index`, which also adds a `noindex` directive and drops the page from Algolia). Use this only for a page whose canonical URL is already declared, with an accurate `lastmod`, in a different sitemap that is submitted to Google (for example, a page that is a build-time placeholder for a URL actually served and indexed from a different origin). Note that `scripts/link-checker/check-links.js` and `scripts/detect-new-404s.js` both derive their URL lists from `sitemap.xml`, so a page excluded this way also drops out of link-checking and 404-detection coverage; add it (or a representative sample, if it's one of many pages generated by the same template) to `additionalRoutes` in `check-links.js` if that coverage gap matters.
+- `title`: Required (unless `redirect_to` is set), 60 characters or less. This controls the default value for the `<title>` tag as well at the top level `<h1>` in the document.
+- `title_tag`: If specified, the `<title>` tag on the rendered call will use this value instead of the `title` attribute.
 
-  - **.md files.** To share common content across articles, use [Hugo Shortcodes](https://gohugo.io/content-management/shortcodes/). Place a .html file in the [layouts/shortcodes] folder. To include it in a page, use syntax `{{< my-shortcode >}}`
+You can also define arbitrary front-matter variable in the YAML section at the top of a file and refer to that same value in the page content. For instance, the you could add the following front matter `foo: "bar"`, and then reference the variable in markdown with the syntax `{{< param foo >}}`.
 
-    For example, our custom [`cleanup`](layouts/shortcodes/cleanup.html) shortcode can be included in .md files, to include common text about cleaning up stack resources:
-
-    ```md
-    {{< cleanup >}}
-    ```
-
-  - **.html layout files.** HTML layouts can include other layouts inside the [layouts/partials](layouts/partials) directory, e.g.:
-
-    ```html
-    {{ partial "head.html" . }}
-    ```
-
-- **Front-matter variables.** You can define a front-matter variable in the YAML section at the top of a file. For instance, the you could add the following front matter `foo: "bar"`, and then reference the variable in markdown with the syntax `{{< param foo >}}`.
-
-  - **no_on_this_page** Specify this variable to prevent displaying an "On This Page" TOC on the right nav for the page.
-  - **block_external_search_index** Specify this variable to prevent crawlers from indexing the page.
-## Style guide
-
-### Language and terminology styles
-
-- Top level headings use **Title Case**, where each word starts with a capital letter.
-- All other headings use **Sentence case**, where only the first word and any proper nouns have a capital letter.
-- Use capitalization only for a proper noun, and use throughout. For example, "stack" should almost always be lowercase in text.
-
-### Referring to "things"
-
-- References to the Pulumi CLI or CLI commands should be enclosed in backticks (e.g., `pulumi up`).
-- References to UI elements within a webpage should be **bold**. (e.g., "Go to the **Account** page in the Pulumi Console and select **sync profile with GitHub**").
-- Use arrows to indicate a navigation. (e.g., "Go to **FooPage** &gt; **BarItem**").
-
-### Formatting
-
-- Use hash marks for headings (`#`, `##`, etc)
-- Use double-asterisks for bold `**`
-- Use underscore for italic `_`
-- Use `--` for en dashes and `---` for em dashes
-  - Do not put spaces before or after the dashes
-- Use code fences (triple-backticks) and a [language identifier](https://gohugo.io/content-management/syntax-highlighting/) for code formatting and syntax highlighting:
-  <pre><code>```typescript
-  const foo = "bar";
-  ```</code></pre>
-
-### Sections
-
-If a tutorial has more following tutorials, use a **Next steps** section at the end. If you're linking to other reference material, use **Learn more**.
-
-## Blog Post Authoring
-
-For instructions on contributing to the [Pulumi blog](https://www.pulumi.com/blog/), [see BLOGGING.md](BLOGGING.md).
+For more information, see [Front Matter](https://gohugo.io/content-management/front-matter/) in the Hugo docs.

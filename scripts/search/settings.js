@@ -34,7 +34,8 @@ module.exports = {
             ["openid connect", "oidc"],
             ["org", "organization"],
             ["provider", "package"],
-            ["pulumi service", "pulumi console", "pulumi cloud"],
+            ["pulumi service", "pulumi console", "pulumi cloud", "platform"],
+            ["neo", "ai", "artificial intelligence"],
             ["rbac", "role based access control"],
             ["saml", "sso"],
             ["stack reference", "stackreference"],
@@ -173,7 +174,7 @@ module.exports = {
                         {
                             position: 0,
                             objectIDs: [
-                                page.getObjectID({ href: "/docs/clouds/aws/guides/" }),
+                                page.getObjectID({ href: "/docs/iac/guides/clouds/aws/" }),
                             ],
                         },
                     ],
@@ -198,7 +199,7 @@ module.exports = {
                         {
                             position: 0,
                             objectIDs: [
-                                page.getObjectID({ href: "/docs/clouds/aws/guides/" }),
+                                page.getObjectID({ href: "/docs/iac/guides/clouds/aws/" }),
                                 page.getObjectID({ href: "/registry/packages/awsx/" }),
                                 page.getObjectID({ href: "/registry/packages/aws-apigateway/" }),
                                 page.getObjectID({ href: "/registry/packages/eks/" }),

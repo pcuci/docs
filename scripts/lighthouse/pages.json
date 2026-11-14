@@ -1,0 +1,17 @@
+[
+    {
+        "key": "homepage",
+        "name": "Homepage",
+        "path": "/"
+    },
+    {
+        "key": "install",
+        "name": "Install Pulumi",
+        "path": "/docs/install/"
+    },
+    {
+        "key": "concepts-resources",
+        "name": "Resources concept",
+        "path": "/docs/iac/concepts/resources/"
+    }
+]
